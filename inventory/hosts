@@ -1,0 +1,2 @@
+[webservers]
+dify ansible_host=185.250.45.249

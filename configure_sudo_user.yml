@@ -1,0 +1,65 @@
+- hosts: all
+  become: true
+  vars:
+    created_username: dopeyslime
+    ssh_key_path: ""
+
+  tasks:
+    - name: Install aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: yes
+
+    - name: Setup passwordless sudo
+      lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%sudo'
+        line: '%sudo ALL=(ALL) NOPASSWD: ALL'
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Create a new regular user with sudo privileges
+      user:
+        name: "{{ created_username }}"
+        state: present
+        groups: sudo
+        append: yes
+        create_home: yes
+
+    - name: Set authorized key for remote GitHub user
+      ansible.posix.authorized_key:
+        user: "{{ created_username }}"
+        state: present
+        key: "{{ lookup('file', ssh_key_path) }}"
+      when: ssh_key_path != ""
+
+
+    - name: Disable password authentication for root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+
+    - name: Update apt and install required system packages
+      apt:
+        name:
+          - curl
+          - vim
+          - git
+          - ufw
+        state: latest
+        update_cache: yes
+
+    - name: UFW - Allow SSH connections
+      community.general.ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: UFW - Enable and deny by default
+      community.general.ufw:
+        state: enabled
+        default: deny
+
+        # ansible-playbook configure_sudo_user.yml -u root --private-key ../ssh/dify --extra-vars "ssh_key_path=../ssh/dify.pub"

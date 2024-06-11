@@ -1,0 +1,96 @@
+- name: Set up Dify
+  hosts: all
+  become: true
+  become_user: dopeyslime
+  vars:
+    git_repository_url: "https://github.com/langgenius/dify.git"
+    git_repository_dest: "/home/dopeyslime/Dify"
+    docker_compose_service_content: |
+      [Unit]
+      Description=Some personal Docker containers
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/bash -c "docker compose -f /home/dopeyslime/Dify/docker/docker-compose.yaml up --detach"
+      ExecStop=/bin/bash -c "docker compose -f /home/dopeyslime/Dify/docker/docker-compose.yaml stop"
+
+      [Install]
+      WantedBy=multi-user.target
+
+
+  tasks:
+    - name: Install required packages
+      become: yes
+      become_user: root
+      apt:
+        name:
+          - python3-pexpect
+          - docker-compose
+        state: latest
+        update_cache: yes
+
+    - name: Check if branch exists
+      shell: git ls-remote --heads "{{ git_repository_url }}" main
+      register: branch_check
+      ignore_errors: true
+
+    - name: Clone Config from GitHub
+      git:
+        repo: "{{ git_repository_url }}"
+        dest: "{{ git_repository_dest }}"
+        version: main
+      when: branch_check.rc == 0
+      register: git_clone_result
+      tags:
+        - git
+
+    - name: Check if Docker Compose is installed
+      command: docker-compose --version
+      register: compose_installed
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Create Docker Compose systemd service template
+      become: yes
+      become_user: root
+      copy:
+        content: "{{ docker_compose_service_content }}"
+        dest: /etc/systemd/system/dify-docker-compose.service
+      notify: Reload systemd
+      tags:
+        - service
+
+    - name: Check Docker service status
+      command: systemctl status docker
+      register: docker_status
+
+    - name: Debug Docker service status
+      debug:
+        msg: "{{ docker_status.stdout_lines }}"
+
+    - name: Check Docker Compose file
+      command: docker-compose -f "{{ git_repository_dest }}/docker/docker-compose.yaml" config
+      register: compose_config_check
+
+    - name: Debug Docker Compose file check
+      debug:
+        msg: "{{ compose_config_check.stdout_lines }}"
+
+    - name: Start and enable Docker Compose service
+      become: yes
+      become_user: root
+      systemd:
+        name: dify-docker-compose
+        state: started
+        enabled: yes
+      tags:
+        - service
+  handlers:
+    - name: Reload systemd
+      become: yes
+      become_user: root
+      systemd:
+        daemon_reload: yes
